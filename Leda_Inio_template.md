@@ -168,7 +168,7 @@ The system architecture consists of:
 
 • **Image URL**: ""
 
-• **Video URL**: https://drive.google.com/file/d/1adkUPBJaBPbUVdirflpQwFOVai84p4k2/view?usp=sharing
+• **Video URL**: https://drive.google.com/file/d/15TS15w2Swd9nbQw82dGnubgJPEP058Mq/view?usp=sharing
 
 ---
 

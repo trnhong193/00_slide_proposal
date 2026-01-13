@@ -1,0 +1,6 @@
+(1) Cloud (all at the Cloud)
+(2) Hybrid (AI Interference at site, Dashboard + Training Cloud)
+(3) Hybrid (AI Interference + Training at site, Dashboard Cloud)
+(4) Full Onpremise (all at the sites)
+(5) 4G: VPN Bridge 
+(6) viMov
