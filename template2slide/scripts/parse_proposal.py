@@ -8,6 +8,31 @@ import json
 import sys
 from pathlib import Path
 
+# Pre-compile regex patterns for better performance
+PARSE_PATTERNS = {
+    'placeholder': re.compile(r'\[([A-Z_]+_\d+)\]'),
+    'proposal_title': re.compile(r'\*\*Proposal Title:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'title_heading': re.compile(r'^#\s+(.+?)$', re.MULTILINE),
+    'client_name1': re.compile(r'\*\*Client Name:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'client_name2': re.compile(r'\*\*Project Owner:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'client_name3': re.compile(r'\*\*Project Owner\*\*[:\s]+(.+?)(?:\n|$)', re.IGNORECASE),
+    'camera_number1': re.compile(r'\*\*Camera Number:\*\*\s*(\d+)\s*cameras?', re.IGNORECASE),
+    'camera_number2': re.compile(r'(\d+)\s*cameras?\s*(?:\(|at|total)', re.IGNORECASE),
+    'camera_number3': re.compile(r'Camera.*?(\d+)\s*cameras?', re.IGNORECASE),
+    'camera_number_digit': re.compile(r'(\d+)'),
+    'ai_modules1': re.compile(r'\*\*AI Modules:\*\*.*?\n((?:\d+\.\s*[^\n]+\n?)+)', re.IGNORECASE | re.DOTALL),
+    'ai_modules2': re.compile(r'\*\*AI Modules\*\*:.*?\n((?:\d+\.\s*[^\n]+\n?)+)', re.IGNORECASE | re.DOTALL),
+    'ai_modules_fallback1': re.compile(r'\*\*AI Modules:\*\*.*?\n((?:\d+\.\s*[^\n]{0,100}\n?)+)', re.IGNORECASE | re.DOTALL),
+    'ai_modules_fallback2': re.compile(r'\*\*AI Modules\*\*:.*?\n((?:\d+\.\s*[^\n]{0,100}\n?)+)', re.IGNORECASE | re.DOTALL),
+    'numbered_item': re.compile(r'^\d+\.\s*(.+?)$', re.MULTILINE),
+    'deployment_cloud': re.compile(r'\bCloud-based\b|\bCloud\b|\bOn-cloud\b', re.IGNORECASE),
+    'deployment_onprem': re.compile(r'\bOn-premise\b|\bOn-prem\b|\bOn premise\b', re.IGNORECASE),
+    'deployment_hybrid': re.compile(r'\bHybrid\b', re.IGNORECASE),
+    'deployment_method1': re.compile(r'\*\*Deployment Method:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'deployment_method2': re.compile(r'\*\*Deployment Method\*\*:\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    # Note: section_extract pattern will be created dynamically
+}
+
 
 class ProposalParser:
     """Parse proposal markdown template and extract architecture information"""
@@ -16,6 +41,24 @@ class ProposalParser:
         self.file_path = Path(markdown_file)
         self.content = self._read_file()
         self.project_info = {}
+        self._validate_no_placeholders()
+    
+    def _validate_no_placeholders(self):
+        """Validate that template has no unresolved placeholders"""
+        placeholders = PARSE_PATTERNS['placeholder'].findall(self.content)
+        if placeholders:
+            print("\n" + "="*80)
+            print("❌ ERROR: Template contains unresolved placeholders!")
+            print("="*80)
+            print(f"Found {len(placeholders)} placeholder(s):")
+            for placeholder in set(placeholders[:10]):  # Show first 10 unique
+                print(f"   - [{placeholder}]")
+            if len(placeholders) > 10:
+                print(f"   ... and {len(placeholders) - 10} more")
+            print("\n⚠️  Please update the template using checklist before proceeding.")
+            print("   Template must be placeholder-free (no [NETWORK_001], [TIMELINE_001], etc.)")
+            print("="*80 + "\n")
+            raise ValueError(f"Template contains {len(placeholders)} unresolved placeholders. Please resolve them first.")
         
     def _read_file(self):
         """Read markdown file content"""
@@ -28,15 +71,13 @@ class ProposalParser:
     
     def extract_project_name(self):
         """Extract project name from proposal title"""
-        # Look for "Proposal Title:" or title in markdown
-        pattern = r'\*\*Proposal Title:\*\*\s*(.+?)(?:\n|$)'
-        match = re.search(pattern, self.content, re.IGNORECASE)
+        # Look for "Proposal Title:" or title in markdown - using pre-compiled pattern
+        match = PARSE_PATTERNS['proposal_title'].search(self.content)
         if match:
             return match.group(1).strip()
         
-        # Fallback: extract from first heading
-        pattern = r'^#\s+(.+?)$'
-        match = re.search(pattern, self.content, re.MULTILINE)
+        # Fallback: extract from first heading - using pre-compiled pattern
+        match = PARSE_PATTERNS['title_heading'].search(self.content)
         if match:
             return match.group(1).strip()
         
@@ -44,22 +85,11 @@ class ProposalParser:
     
     def extract_client_name(self):
         """Extract client name - NO DEFAULT VALUES"""
-        pattern = r'\*\*Client Name:\*\*\s*(.+?)(?:\n|$)'
-        match = re.search(pattern, self.content, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        
-        # Try "Project Owner"
-        pattern = r'\*\*Project Owner:\*\*\s*(.+?)(?:\n|$)'
-        match = re.search(pattern, self.content, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        
-        # Try alternate format: **Project Owner** Value (colon outside bold)
-        pattern = r'\*\*Project Owner\*\*[:\s]+(.+?)(?:\n|$)'
-        match = re.search(pattern, self.content, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
+        # Try patterns in order using pre-compiled patterns
+        for pattern_name in ['client_name1', 'client_name2', 'client_name3']:
+            match = PARSE_PATTERNS[pattern_name].search(self.content)
+            if match:
+                return match.group(1).strip()
         
         print("⚠️  ERROR: Client Name (Project Owner) not found in template. Please check the template.")
         print("   Expected format: **Client Name:** Value or **Project Owner:** Value")
@@ -67,21 +97,16 @@ class ProposalParser:
     
     def extract_camera_number(self):
         """Extract number of cameras"""
-        patterns = [
-            r'\*\*Camera Number:\*\*\s*(\d+)\s*cameras?',
-            r'(\d+)\s*cameras?\s*(?:\(|at|total)',
-            r'Camera.*?(\d+)\s*cameras?',
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, self.content, re.IGNORECASE)
+        # Try patterns in order using pre-compiled patterns
+        for pattern_name in ['camera_number1', 'camera_number2', 'camera_number3']:
+            match = PARSE_PATTERNS[pattern_name].search(self.content)
             if match:
                 return int(match.group(1))
         
         # Try to find number in "Camera Number:" section
         section = self._extract_section("Camera Number")
         if section:
-            match = re.search(r'(\d+)', section)
+            match = PARSE_PATTERNS['camera_number_digit'].search(section)
             if match:
                 return int(match.group(1))
         
@@ -94,16 +119,12 @@ class ProposalParser:
         # First, try to find in PROJECT REQUIREMENT STATEMENT section
         section = self._extract_section("PROJECT REQUIREMENT STATEMENT")
         if section:
-            # Look for "AI Modules:" followed by numbered list
-            # Support both formats: **AI Modules:** and **AI Modules**:
-            pattern1 = r'\*\*AI Modules:\*\*.*?\n((?:\d+\.\s*[^\n]+\n?)+)'
-            pattern2 = r'\*\*AI Modules\*\*:.*?\n((?:\d+\.\s*[^\n]+\n?)+)'
-            match = re.search(pattern1, section, re.IGNORECASE | re.DOTALL) or re.search(pattern2, section, re.IGNORECASE | re.DOTALL)
+            # Look for "AI Modules:" followed by numbered list - using pre-compiled patterns
+            match = PARSE_PATTERNS['ai_modules1'].search(section) or PARSE_PATTERNS['ai_modules2'].search(section)
             if match:
                 module_list = match.group(1)
-                # Extract each numbered item
-                pattern = r'^\d+\.\s*(.+?)$'
-                matches = re.findall(pattern, module_list, re.MULTILINE)
+                # Extract each numbered item - using pre-compiled pattern
+                matches = PARSE_PATTERNS['numbered_item'].findall(module_list)
                 if matches:
                     for m in matches:
                         module_name = m.strip()
@@ -118,7 +139,7 @@ class ProposalParser:
             if section:
                 lines = section.split('\n')
                 for line in lines:
-                    match = re.match(r'^\d+\.\s*(.+?)$', line.strip())
+                    match = PARSE_PATTERNS['numbered_item'].match(line.strip())
                     if match:
                         module_name = match.group(1).strip()
                         if len(module_name) < 100:
@@ -127,15 +148,12 @@ class ProposalParser:
                         break
         
         # Fallback: search entire document for numbered list after "AI Modules:"
-        # Support both formats: **AI Modules:** and **AI Modules**:
+        # Using pre-compiled patterns
         if not modules:
-            pattern1 = r'\*\*AI Modules:\*\*.*?\n((?:\d+\.\s*[^\n]{0,100}\n?)+)'
-            pattern2 = r'\*\*AI Modules\*\*:.*?\n((?:\d+\.\s*[^\n]{0,100}\n?)+)'
-            match = re.search(pattern1, self.content, re.IGNORECASE | re.DOTALL) or re.search(pattern2, self.content, re.IGNORECASE | re.DOTALL)
+            match = PARSE_PATTERNS['ai_modules_fallback1'].search(self.content) or PARSE_PATTERNS['ai_modules_fallback2'].search(self.content)
             if match:
                 module_list = match.group(1)
-                pattern = r'^\d+\.\s*(.+?)$'
-                matches = re.findall(pattern, module_list, re.MULTILINE)
+                matches = PARSE_PATTERNS['numbered_item'].findall(module_list)
                 if matches:
                     modules = [m.strip() for m in matches if len(m.strip()) < 100]
         
@@ -146,20 +164,16 @@ class ProposalParser:
         # Look for "Deployment Method:" section
         section = self._extract_section("SYSTEM ARCHITECTURE")
         if section:
-            # Check for deployment method keywords
-            if re.search(r'\bCloud-based\b|\bCloud\b|\bOn-cloud\b', section, re.IGNORECASE):
+            # Check for deployment method keywords - using pre-compiled patterns
+            if PARSE_PATTERNS['deployment_cloud'].search(section):
                 return "cloud"
-            elif re.search(r'\bOn-premise\b|\bOn-prem\b|\bOn premise\b', section, re.IGNORECASE):
+            elif PARSE_PATTERNS['deployment_onprem'].search(section):
                 return "on-prem"
-            elif re.search(r'\bHybrid\b', section, re.IGNORECASE):
+            elif PARSE_PATTERNS['deployment_hybrid'].search(section):
                 return "hybrid"
         
-        # Check in "Deployment Method:" field - support both formats:
-        # **Deployment Method:** Value (colon inside bold)
-        # **Deployment Method**: Value (colon outside bold)
-        pattern1 = r'\*\*Deployment Method:\*\*\s*(.+?)(?:\n|$)'
-        pattern2 = r'\*\*Deployment Method\*\*:\s*(.+?)(?:\n|$)'
-        match = re.search(pattern1, self.content, re.IGNORECASE) or re.search(pattern2, self.content, re.IGNORECASE)
+        # Check in "Deployment Method:" field - using pre-compiled patterns
+        match = PARSE_PATTERNS['deployment_method1'].search(self.content) or PARSE_PATTERNS['deployment_method2'].search(self.content)
         if match:
             method = match.group(1).lower()
             if 'cloud' in method:
@@ -170,11 +184,11 @@ class ProposalParser:
                 return "hybrid"
         
         # Try to infer from content - but still warn if not explicit
-        if re.search(r'\bcloud\b', self.content, re.IGNORECASE):
+        if PARSE_PATTERNS['deployment_cloud'].search(self.content):
             print("⚠️  WARNING: Deployment method not explicitly found. Inferred 'cloud' from content.")
             print("   Expected format: **Deployment Method:** Value or explicit mention in SYSTEM ARCHITECTURE section")
             return "cloud"
-        elif re.search(r'\bon-prem\b|\bon premise\b', self.content, re.IGNORECASE):
+        elif PARSE_PATTERNS['deployment_onprem'].search(self.content):
             print("⚠️  WARNING: Deployment method not explicitly found. Inferred 'on-premise' from content.")
             print("   Expected format: **Deployment Method:** Value or explicit mention in SYSTEM ARCHITECTURE section")
             return "on-prem"
@@ -279,7 +293,7 @@ class ProposalParser:
     
     def _extract_section(self, section_name):
         """Extract a specific section from markdown"""
-        # Look for section heading
+        # Look for section heading - compile pattern dynamically for section name
         pattern = rf'##+\s*{re.escape(section_name)}.*?\n(.*?)(?=##|\Z)'
         match = re.search(pattern, self.content, re.IGNORECASE | re.DOTALL)
         if match:

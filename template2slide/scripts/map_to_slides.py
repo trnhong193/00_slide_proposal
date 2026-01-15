@@ -18,6 +18,74 @@ try:
 except ImportError:
     HAS_MARKDOWN = False
 
+# Pre-compile regex patterns for better performance
+REGEX_PATTERNS = {
+    # Section headers
+    'section_header': re.compile(r'^##\s+(.+?)(?:\s*---)?\s*$', re.MULTILINE),
+    'separator_line': re.compile(r'^---\s*\n?', re.MULTILINE),
+    'leading_empty_lines': re.compile(r'^\s*\n+', re.MULTILINE),
+    
+    # Project name extraction
+    'title_heading': re.compile(r'^#\s+(.+?)$', re.MULTILINE),
+    'technical_proposal': re.compile(r'Technical\s+Proposal.*$', re.IGNORECASE),
+    
+    # Key-value pairs - unified pattern supporting both formats
+    'table_row': re.compile(r'\|\s*\*\*(.+?)\*\*\s*\|\s*(.+?)\s*\|'),
+    'key_marker_colon_inside': re.compile(r'\*\*([^:]+?):\*\*\s*', re.MULTILINE),
+    'key_marker_colon_outside': re.compile(r'\*\*([^:]+?)\*\*:\s*', re.MULTILINE),
+    'source_reference': re.compile(r'\*\*Source[:\s]*.*$', re.IGNORECASE),
+    'separator_in_value': re.compile(r'\n\s*---\s*(\n|$)', re.MULTILINE),
+    'trailing_separator': re.compile(r'\n\s*---\s*$', re.MULTILINE),
+    'numbered_list': re.compile(r'^\d+\.\s+', re.MULTILINE),
+    'newlines': re.compile(r'\n+'),
+    
+    # Date extraction - unified pattern
+    'date_pattern': re.compile(r'\*\*Date(?:\*\*[:\s]+|:\*\*\s*)(\d{4}-\d{2}-\d{2}|\w+\s+\d{4})', re.IGNORECASE),
+    
+    # Client name extraction - unified pattern
+    'client_name_pattern1': re.compile(r'\*\*Project Owner:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'client_name_pattern2': re.compile(r'\*\*Project Owner\*\*[:\s]+(.+?)(?:\n|$)', re.IGNORECASE),
+    'client_name_pattern3': re.compile(r'\*\*Client Name:\*\*\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    
+    # Module extraction - unified patterns
+    'module_header_hash': re.compile(r'^###\s+Module(?:\s+\d+)?\s*:\s*(.+?)$', re.IGNORECASE | re.MULTILINE),
+    'module_header_bold': re.compile(r'\*\*Module\s+(?:\d+)?:\s*(.+?)\*\*', re.IGNORECASE),
+    'module_header_plain': re.compile(r'(?:Module|Module Name)[:\s]+(.+?)(?:\n|$)', re.IGNORECASE | re.MULTILINE),
+    'next_module_hash': re.compile(r'^###\s+Module(?:\s+\d+)?\s*:\s*', re.IGNORECASE | re.MULTILINE),
+    'next_module_bold': re.compile(r'\*\*Module\s+(?:\d+)?:\s*', re.IGNORECASE),
+    
+    # Module fields - unified pattern
+    'module_type': re.compile(r'\*\*Module Type(?::\*\*|\*\*:)\s*(.+?)(?:\n|$)', re.IGNORECASE),
+    'field_marker': re.compile(r'(?:•\s*)?\*\*([^:]+?)(?::\*\*|\*\*:)\s*(.*)$', re.MULTILINE),
+    
+    # Timeline extraction - unified patterns
+    'timeline_phase_pattern1': re.compile(r'\*\*Phase\s+(T\d+):\s*([^*\n]+?)\*\*', re.IGNORECASE | re.MULTILINE),
+    'timeline_phase_pattern2': re.compile(r'\*\*Phase\s+(T\d+):\*\*\s*(.+?)(?=\*\*Phase|\*\*Total|---|\Z)', re.IGNORECASE | re.DOTALL),
+    'timeline_phase_pattern3': re.compile(r'\*\*Phase\s+(T\d+)\*\*:\s*(.+?)(?=\n\*\*Phase|\n\*\*Total|\n---|\Z)', re.IGNORECASE | re.MULTILINE | re.DOTALL),
+    'next_phase': re.compile(r'\*\*Phase\s+T\d+', re.IGNORECASE),
+    'next_duration': re.compile(r'\*\*Total Duration', re.IGNORECASE),
+    'next_separator': re.compile(r'\n\s*---\s*\n', re.IGNORECASE),
+    'timeline_date_format1': re.compile(r'(T\d+)\s*=\s*T\d+\s*\+\s*(.+?)(?:\n|$|\)|,|\.)', re.IGNORECASE),
+    'timeline_date_format2': re.compile(r'\(?\s*T\d+\s*\+\s*(.+?)\s*\)?', re.IGNORECASE),
+    'timeline_duration': re.compile(r'(\d+\s*[-–]\s*\d+|\d+)\s*(weeks?|days?|months?)', re.IGNORECASE),
+    
+    # Mermaid diagram extraction
+    'mermaid_code_block1': re.compile(r'```mermaid\s*\n(.*?)\n```', re.DOTALL),
+    'mermaid_code_block2': re.compile(r'```mermaid\s*\n(.*?)```', re.DOTALL),
+    
+    # Placeholder validation
+    'placeholder_pattern': re.compile(r'\[([A-Z_]+_\d+)\]'),
+    
+    # Bullet points
+    'bullet_marker': re.compile(r'^\s*[-*•]\s*', re.MULTILINE),
+    'nested_bullet_2': re.compile(r'^\s{2}[-*•]\s+', re.MULTILINE),
+    'nested_bullet_4': re.compile(r'^\s{4}[-*•]\s+', re.MULTILINE),
+    
+    # Cleanup patterns
+    'bold_markers': re.compile(r'\*\*'),
+    'whitespace': re.compile(r'\s+'),
+}
+
 
 class ProposalParser:
     """Parse proposal markdown template"""
@@ -26,6 +94,7 @@ class ProposalParser:
         self.file_path = Path(markdown_file)
         self.content = self._read_file()
         self.sections = {}
+        self._validate_no_placeholders()
         
     def _read_file(self) -> str:
         """Read markdown file"""
@@ -35,6 +104,23 @@ class ProposalParser:
         except Exception as e:
             print(f"Error reading file: {e}")
             sys.exit(1)
+    
+    def _validate_no_placeholders(self) -> None:
+        """Validate that template has no unresolved placeholders"""
+        placeholders = REGEX_PATTERNS['placeholder_pattern'].findall(self.content)
+        if placeholders:
+            print("\n" + "="*80)
+            print("❌ ERROR: Template contains unresolved placeholders!")
+            print("="*80)
+            print(f"Found {len(placeholders)} placeholder(s):")
+            for placeholder in set(placeholders[:10]):  # Show first 10 unique
+                print(f"   - [{placeholder}]")
+            if len(placeholders) > 10:
+                print(f"   ... and {len(placeholders) - 10} more")
+            print("\n⚠️  Please update the template using checklist before proceeding.")
+            print("   Template must be placeholder-free (no [NETWORK_001], [TIMELINE_001], etc.)")
+            print("="*80 + "\n")
+            raise ValueError(f"Template contains {len(placeholders)} unresolved placeholders. Please resolve them first.")
     
     def parse(self) -> Dict[str, Any]:
         """Parse proposal and extract sections"""
@@ -52,12 +138,11 @@ class ProposalParser:
     def _extract_project_name(self) -> str:
         """Extract project name from proposal"""
         # Try to find from title or first heading
-        pattern = r'^#\s+(.+?)$'
-        match = re.search(pattern, self.content, re.MULTILINE)
+        match = REGEX_PATTERNS['title_heading'].search(self.content)
         if match:
             title = match.group(1).strip()
             # Remove "Technical Proposal" or similar
-            title = re.sub(r'Technical\s+Proposal.*$', '', title, flags=re.IGNORECASE).strip()
+            title = REGEX_PATTERNS['technical_proposal'].sub('', title).strip()
             return title
         
         # Fallback to filename
@@ -76,10 +161,8 @@ class ProposalParser:
             except:
                 pass
         
-        # Pattern to match section headers (## Section Name)
-        # Improved pattern: handles variations in spacing and formatting
-        section_pattern = r'^##\s+(.+?)(?:\s*---)?\s*$'
-        matches = list(re.finditer(section_pattern, self.content, re.MULTILINE))
+        # Pattern to match section headers (## Section Name) - using pre-compiled pattern
+        matches = list(REGEX_PATTERNS['section_header'].finditer(self.content))
         
         for i, match in enumerate(matches):
             section_name = match.group(1).strip()
@@ -92,9 +175,9 @@ class ProposalParser:
                 end_pos = len(self.content)
             
             section_content = self.content[start_pos:end_pos].strip()
-            # Remove leading separator lines (---) and empty lines
-            section_content = re.sub(r'^---\s*\n?', '', section_content, flags=re.MULTILINE)
-            section_content = re.sub(r'^\s*\n+', '', section_content, flags=re.MULTILINE)  # Remove leading empty lines
+            # Remove leading separator lines (---) and empty lines - using pre-compiled patterns
+            section_content = REGEX_PATTERNS['separator_line'].sub('', section_content)
+            section_content = REGEX_PATTERNS['leading_empty_lines'].sub('', section_content)
             sections[section_name] = section_content
         
         return sections
@@ -156,11 +239,8 @@ class SlideMapper:
         # Extract title
         title = f"Video Analytics Solution Proposal for {self._extract_client_name(sections)}"
         
-        # Extract date - supports both **Date:** and **Date** formats
-        date_match = re.search(r'\*\*Date\*\*[:\s]+(\d{4}-\d{2}-\d{2}|\w+\s+\d{4})', cover_page, re.IGNORECASE)
-        if not date_match:
-            # Try alternative format: **Date:** value
-            date_match = re.search(r'\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2}|\w+\s+\d{4})', cover_page, re.IGNORECASE)
+        # Extract date - using unified pre-compiled pattern
+        date_match = REGEX_PATTERNS['date_pattern'].search(cover_page)
         if date_match:
             date = date_match.group(1)
         else:
@@ -249,7 +329,7 @@ class SlideMapper:
         if self.architecture_diagram_path:
             diagram_code = self._read_architecture_diagram()
         
-        # Slide 1: Diagram
+        # Create diagram slide from Mermaid code (not from template)
         self.slides.append({
             "slide_number": self.slide_number,
             "type": "diagram",
@@ -516,18 +596,11 @@ class SlideMapper:
     def _extract_client_name(self, sections: Dict[str, str]) -> str:
         """Extract client name from Project Requirement Statement"""
         project_req = sections.get("2. PROJECT REQUIREMENT STATEMENT", "")
-        # Try pattern 1: **Project Owner:** Value (colon inside bold)
-        match = re.search(r'\*\*Project Owner:\*\*\s*(.+?)(?:\n|$)', project_req, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        # Try pattern 2: **Project Owner** Value (colon outside bold)
-        match = re.search(r'\*\*Project Owner\*\*[:\s]+(.+?)(?:\n|$)', project_req, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        # Try pattern 3: **Client Name:** Value
-        match = re.search(r'\*\*Client Name:\*\*\s*(.+?)(?:\n|$)', project_req, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
+        # Try patterns in order using pre-compiled patterns
+        for pattern_name in ['client_name_pattern1', 'client_name_pattern2', 'client_name_pattern3']:
+            match = REGEX_PATTERNS[pattern_name].search(project_req)
+            if match:
+                return match.group(1).strip()
         print("\n❌ ERROR: Client Name (Project Owner) not found in template.")
         print("   Expected format: **Project Owner:** Value or **Client Name:** Value")
         print("   Please check the template and ensure client name is present.")
@@ -549,25 +622,20 @@ class SlideMapper:
         """Extract key-value pairs from markdown table or **Key:** Value format"""
         pairs = {}
         
-        # Method 1: Try table format first (| **Key** | Value |)
-        table_pattern = r'\|\s*\*\*(.+?)\*\*\s*\|\s*(.+?)\s*\|'
-        matches = re.finditer(table_pattern, content)
-        for match in matches:
+        # Method 1: Try table format first (| **Key** | Value |) - using pre-compiled pattern
+        for match in REGEX_PATTERNS['table_row'].finditer(content):
             key = match.group(1).strip()
             value = match.group(2).strip()
-            # Clean value (remove markdown, source references)
-            value = re.sub(r'\*\*Source[:\s]*.*$', '', value, flags=re.IGNORECASE).strip()
-            value = re.sub(r'\*\*', '', value).strip()
+            # Clean value (remove markdown, source references) - using pre-compiled patterns
+            value = REGEX_PATTERNS['source_reference'].sub('', value).strip()
+            value = REGEX_PATTERNS['bold_markers'].sub('', value).strip()
             pairs[key] = value
         
         # Method 2: Try **Key:** Value format (if table format didn't find anything)
         if not pairs:
-            # Split content by key-value pairs
-            # Pattern to find all **Key:** markers - support both **Key:** and **Key**:
-            # Pattern 1: **Key:** (colon inside bold) - match **Key:** with optional space after colon
-            key_markers1 = list(re.finditer(r'\*\*([^:]+?):\*\*\s*', content, re.MULTILINE))
-            # Pattern 2: **Key**: (colon outside bold) - only if pattern 1 didn't match
-            key_markers2 = list(re.finditer(r'\*\*([^:]+?)\*\*:\s*', content, re.MULTILINE)) if not key_markers1 else []
+            # Try both patterns and use whichever finds matches
+            key_markers1 = list(REGEX_PATTERNS['key_marker_colon_inside'].finditer(content))
+            key_markers2 = list(REGEX_PATTERNS['key_marker_colon_outside'].finditer(content)) if not key_markers1 else []
             key_markers = key_markers1 if key_markers1 else key_markers2
             
             for i, marker in enumerate(key_markers):
@@ -582,29 +650,28 @@ class SlideMapper:
                 
                 # Extract value, but stop at separator (---) if found
                 value_section = content[start_pos:end_pos]
-                # Check for separator (--- on its own line)
-                separator_match = re.search(r'\n\s*---\s*(\n|$)', value_section)
+                separator_match = REGEX_PATTERNS['separator_in_value'].search(value_section)
                 if separator_match:
                     value_section = value_section[:separator_match.start()]
                 
                 value = value_section.strip()
                 
-                # Remove any trailing separators or extra dashes
-                value = re.sub(r'\n\s*---\s*$', '', value).strip()
+                # Remove any trailing separators - using pre-compiled pattern
+                value = REGEX_PATTERNS['trailing_separator'].sub('', value).strip()
                 
                 # Special handling for list values (like AI Modules)
                 # If value starts with numbered list (1. 2. 3.), keep line breaks
-                if re.match(r'^\d+\.\s+', value, re.MULTILINE):
+                if REGEX_PATTERNS['numbered_list'].match(value):
                     # Keep as multiline, just clean up extra whitespace
                     lines = [line.strip() for line in value.split('\n') if line.strip()]
                     value = '\n'.join(lines)
                 else:
-                    # For non-list values, replace newlines with space
-                    value = re.sub(r'\n+', ' ', value).strip()
+                    # For non-list values, replace newlines with space - using pre-compiled pattern
+                    value = REGEX_PATTERNS['newlines'].sub(' ', value).strip()
                 
-                # Clean value - remove trailing source references
-                value = re.sub(r'\n\s*\*\*Source[:\s]*.*$', '', value, flags=re.IGNORECASE | re.DOTALL).strip()
-                value = re.sub(r'\*\*', '', value).strip()
+                # Clean value - remove trailing source references - using pre-compiled patterns
+                value = REGEX_PATTERNS['source_reference'].sub('', value).strip()
+                value = REGEX_PATTERNS['bold_markers'].sub('', value).strip()
                 
                 if value:
                     pairs[key] = value
@@ -661,10 +728,10 @@ class SlideMapper:
                 if (line_stripped.startswith('-') or 
                     line_stripped.startswith('*') or 
                     line_stripped.startswith('•')):
-                    # Remove bullet marker
-                    item = re.sub(r'^\s*[-*•]\s*', '', line)
-                    # Remove markdown bold markers
-                    item = re.sub(r'\*\*', '', item).strip()
+                    # Remove bullet marker - using pre-compiled pattern
+                    item = REGEX_PATTERNS['bullet_marker'].sub('', line)
+                    # Remove markdown bold markers - using pre-compiled pattern
+                    item = REGEX_PATTERNS['bold_markers'].sub('', item).strip()
                     # Skip if item is just dashes, empty, or separator
                     if item and not re.match(r'^-+$', item) and item != '---':
                         items.append(item)
@@ -678,8 +745,9 @@ class SlideMapper:
     def _extract_subsection(self, content: str) -> Dict[str, str]:
         """Extract sub-sections (### Subsection Name)"""
         subsections = {}
-        pattern = r'^###\s+(.+?)$'
-        matches = list(re.finditer(pattern, content, re.MULTILINE))
+        # Using a simple pattern for subsection headers
+        pattern = re.compile(r'^###\s+(.+?)$', re.MULTILINE)
+        matches = list(pattern.finditer(content))
         
         for i, match in enumerate(matches):
             subsection_name = match.group(1).strip()
@@ -700,21 +768,21 @@ class SlideMapper:
             if not line or line.startswith('|'):
                 continue
             
-            # Determine level
+            # Determine level - using pre-compiled patterns
             level = 0
-            if line.startswith('-') or line.startswith('*') or line.startswith('•'):
+            if REGEX_PATTERNS['bullet_marker'].match(line):
                 level = 0
-                line = re.sub(r'^[-*•]\s+', '', line)
-            elif line.startswith('  -') or line.startswith('  *'):
+                line = REGEX_PATTERNS['bullet_marker'].sub('', line)
+            elif REGEX_PATTERNS['nested_bullet_2'].match(line):
                 level = 1
-                line = re.sub(r'^\s+[-*•]\s+', '', line)
-            elif line.startswith('    -') or line.startswith('    *'):
+                line = REGEX_PATTERNS['nested_bullet_2'].sub('', line)
+            elif REGEX_PATTERNS['nested_bullet_4'].match(line):
                 level = 2
-                line = re.sub(r'^\s+[-*•]\s+', '', line)
+                line = REGEX_PATTERNS['nested_bullet_4'].sub('', line)
             
-            # Clean markdown
-            line = re.sub(r'\*\*', '', line)
-            line = re.sub(r'\*\*Source[:\s]*.*$', '', line, flags=re.IGNORECASE).strip()
+            # Clean markdown - using pre-compiled patterns
+            line = REGEX_PATTERNS['bold_markers'].sub('', line)
+            line = REGEX_PATTERNS['source_reference'].sub('', line).strip()
             
             if line:
                 bullets.append({
@@ -728,35 +796,29 @@ class SlideMapper:
         """Extract timeline milestones with date format: T1 = T0 + x weeks"""
         milestones = []
         
-        # Pattern 1: **Phase T0: Project Award** (with colon inside bold, event name in same bold)
-        # The format is: **Phase T0: Event Name** (all in one bold block)
-        # Pattern matches: **Phase T0: Event Name** where Event Name is not bold
-        pattern1 = r'\*\*Phase\s+(T\d+):\s*([^*\n]+?)\*\*'
-        matches1 = list(re.finditer(pattern1, content, re.IGNORECASE | re.MULTILINE))
-        
-        # If pattern1 doesn't match, try alternative formats
+        # Try patterns in order using pre-compiled patterns
+        matches1 = list(REGEX_PATTERNS['timeline_phase_pattern1'].finditer(content))
         if not matches1:
-            # Pattern 2: **Phase T0:** Event Name (colon inside bold, event on same or next line)
-            # Use DOTALL to match across newlines, stop at next Phase or Total or separator
-            pattern2 = r'\*\*Phase\s+(T\d+):\*\*\s*(.+?)(?=\*\*Phase|\*\*Total|---|\Z)'
-            matches1 = list(re.finditer(pattern2, content, re.IGNORECASE | re.DOTALL))
-        
+            matches1 = list(REGEX_PATTERNS['timeline_phase_pattern2'].finditer(content))
         if not matches1:
-            # Pattern 3: **Phase T0**: Event Name (colon outside bold)
-            pattern3 = r'\*\*Phase\s+(T\d+)\*\*:\s*(.+?)(?=\n\*\*Phase|\n\*\*Total|\n---|\Z)'
-            matches1 = list(re.finditer(pattern3, content, re.IGNORECASE | re.MULTILINE | re.DOTALL))
+            matches1 = list(REGEX_PATTERNS['timeline_phase_pattern3'].finditer(content))
         
         for match in matches1:
             phase = match.group(1).strip()
             event_name = match.group(2).strip()
             
+            # Clean event_name - extract just the phase name (e.g., "Hardware Deployment")
+            # The event_name might contain the full text including "- Duration:" line
+            # Extract only the first line (phase name)
+            phase_name = event_name.split('\n')[0].strip()
+            phase_name = re.sub(r'^[-*•]\s*', '', phase_name).strip()
+            
             # Find the section content after this phase header
             start_pos = match.end()
-            # Look for next phase (with **Phase) or end of section
-            # Also check for **Total Duration** or separator (---)
-            next_phase = re.search(r'\*\*Phase\s+T\d+', content[start_pos:], re.IGNORECASE)
-            next_duration = re.search(r'\*\*Total Duration', content[start_pos:], re.IGNORECASE)
-            next_separator = re.search(r'\n\s*---\s*\n', content[start_pos:], re.IGNORECASE)
+            # Look for next phase (with **Phase) or end of section - using pre-compiled patterns
+            next_phase = REGEX_PATTERNS['next_phase'].search(content[start_pos:])
+            next_duration = REGEX_PATTERNS['next_duration'].search(content[start_pos:])
+            next_separator = REGEX_PATTERNS['next_separator'].search(content[start_pos:])
             
             end_pos = len(content)
             if next_phase:
@@ -768,68 +830,31 @@ class SlideMapper:
             
             phase_content = content[start_pos:end_pos]
             
-            # Extract date/duration - try multiple formats
+            # Extract duration - search in both event_name and phase_content
+            # The duration might be in event_name (if pattern captured it) or in phase_content
             date = ""
-            # Format 1: T1 = T0 + x weeks (full format)
-            date_match = re.search(rf'{phase}\s*=\s*T\d+\s*\+\s*(.+?)(?:\n|$|\)|,|\.)', event_name + '\n' + phase_content, re.IGNORECASE)
-            if date_match:
-                date = f"{phase} = {date_match.group(1).strip()}"
-            else:
-                # Format 2: (T0 + x weeks) or T0 + x weeks
-                date_match = re.search(r'\(?\s*T\d+\s*\+\s*(.+?)\s*\)?', event_name + '\n' + phase_content, re.IGNORECASE)
-                if date_match:
-                    prev_phase = f"T{int(phase[1:]) - 1}" if phase[1:].isdigit() else "T0"
-                    date = f"{phase} = {prev_phase} + {date_match.group(1).strip()}"
-                else:
-                    # Format 3: Just duration (e.g., "2-4 weeks") - construct full format
-                    duration_match = re.search(r'(\d+\s*[-–]\s*\d+|\d+)\s*(weeks?|days?|months?)', phase_content, re.IGNORECASE)
-                    if duration_match and phase != "T0":
-                        prev_phase = f"T{int(phase[1:]) - 1}" if phase[1:].isdigit() else "T0"
-                        date = f"{phase} = {prev_phase} + {duration_match.group(0).strip()}"
+            # Pattern: "- Duration:" or "Duration:" followed by duration (e.g., "T0 + 1-2 weeks")
+            # Search in event_name first (it might contain the duration line)
+            duration_match = re.search(r'[-*•]?\s*Duration:\s*([^\n]+)', event_name, re.IGNORECASE)
+            if not duration_match:
+                # If not in event_name, search in phase_content
+                duration_match = re.search(r'[-*•]?\s*Duration:\s*([^\n]+)', phase_content, re.IGNORECASE)
             
-            # Extract notes (bullet points) from phase content
-            notes = []
-            for line in phase_content.split('\n'):
-                line = line.strip()
-                if line.startswith('-') and not line.startswith('---'):
-                    note = re.sub(r'^-\s*\*\*', '', line)
-                    note = re.sub(r'\*\*', '', note).strip()
-                    if note:
-                        notes.append(note)
+            if duration_match:
+                duration_text = duration_match.group(1).strip()
+                # Remove trailing punctuation and clean up
+                duration_text = re.sub(r'[.,;]$', '', duration_text).strip()
+                date = duration_text
+            elif phase == "T0":
+                date = "T0"
             
+            # Store phase_name as the phase name to display, and date as duration
             milestones.append({
-                "phase": phase,
-                "event": event_name,
-                "date": date,
-                "notes": notes
+                "phase": phase_name,  # Phase name (e.g., "Software Deployment")
+                "event": phase_name,  # Keep for compatibility
+                "date": date,  # Duration (e.g., "T1 + 4-6 weeks")
+                "notes": []
             })
-        
-        # Pattern 2: **Phase T0** Event Name (colon outside bold) - fallback
-        if not milestones:
-            pattern2 = r'\*\*Phase\s+(T\d+)\*\*[:\s]+(.+?)(?:\n|\*\*)'
-            matches2 = re.finditer(pattern2, content, re.IGNORECASE | re.DOTALL)
-            
-            for match in matches2:
-                phase = match.group(1).strip()
-                description = match.group(2).strip()
-                
-                # Extract date/duration - try multiple formats
-                date = ""
-                date_match = re.search(rf'{phase}\s*=\s*T\d+\s*\+\s*(.+?)(?:\n|$|\)|,|\.)', description, re.IGNORECASE)
-                if date_match:
-                    date = f"{phase} = {date_match.group(1).strip()}"
-                else:
-                    date_match = re.search(r'\(?\s*T\d+\s*\+\s*(.+?)\s*\)?', description, re.IGNORECASE)
-                    if date_match:
-                        prev_phase = f"T{int(phase[1:]) - 1}" if phase[1:].isdigit() else "T0"
-                        date = f"{phase} = {prev_phase} + {date_match.group(1).strip()}"
-                
-                milestones.append({
-                    "phase": phase,
-                    "event": description.split('\n')[0] if '\n' in description else description,
-                    "date": date,
-                    "notes": []
-                })
         
         return milestones
     
@@ -852,16 +877,15 @@ class SlideMapper:
         modules = []
         
         # Pattern 1: ### Module [number]: [Name] (markdown header format - 3 hashes)
-        # Supports both "### Module: Name" and "### Module 1: Name"
-        pattern1 = r'^###\s+Module(?:\s+\d+)?\s*:\s*(.+?)$'
-        matches1 = list(re.finditer(pattern1, content, re.IGNORECASE | re.MULTILINE))
+        # Using pre-compiled pattern
+        matches1 = list(REGEX_PATTERNS['module_header_hash'].finditer(content))
         
         for match in matches1:
             module_name = match.group(1).strip()
             # Extract module details from the section following this module name
             start_pos = match.end()
-            # Find the end of this module's section (next module or end of content)
-            next_module = re.search(r'^###\s+Module(?:\s+\d+)?\s*:\s*', content[start_pos:], re.IGNORECASE | re.MULTILINE)
+            # Find the end of this module's section (next module or end of content) - using pre-compiled pattern
+            next_module = REGEX_PATTERNS['next_module_hash'].search(content[start_pos:])
             end_pos = start_pos + next_module.start() if next_module else len(content)
             module_content = content[start_pos:end_pos]
             
@@ -880,17 +904,16 @@ class SlideMapper:
             })
         
         # Pattern 2: **Module [number]: [Name]** (e.g., **Module 1: Safety Helmet Detection**)
-        # Fallback pattern for bold format
+        # Fallback pattern for bold format - using pre-compiled pattern
         if not modules:
-            pattern2 = r'\*\*Module\s+(?:\d+)?:\s*(.+?)\*\*'
-            matches2 = list(re.finditer(pattern2, content, re.IGNORECASE))
+            matches2 = list(REGEX_PATTERNS['module_header_bold'].finditer(content))
             
             for match in matches2:
                 module_name = match.group(1).strip()
                 # Extract module details from the section following this module name
                 start_pos = match.end()
-                # Find the end of this module's section (next module or end of content)
-                next_module = re.search(r'\*\*Module\s+(?:\d+)?:\s*', content[start_pos:], re.IGNORECASE)
+                # Find the end of this module's section (next module or end of content) - using pre-compiled pattern
+                next_module = REGEX_PATTERNS['next_module_bold'].search(content[start_pos:])
                 end_pos = start_pos + next_module.start() if next_module else len(content)
                 module_content = content[start_pos:end_pos]
                 
@@ -910,13 +933,12 @@ class SlideMapper:
         
         # Pattern 3: Module: [Name] or Module Name: [Name] (fallback for other formats)
         if not modules:
-            # Try pattern without ** markers
-            pattern2 = r'(?:Module|Module Name)[:\s]+(.+?)(?:\n|$)'
-            matches2 = re.finditer(pattern2, content, re.IGNORECASE | re.MULTILINE)
+            # Try pattern without ** markers - using pre-compiled pattern
+            matches2 = REGEX_PATTERNS['module_header_plain'].finditer(content)
             for match in matches2:
                 module_name = match.group(1).strip()
-                # Remove markdown if present
-                module_name = re.sub(r'\*\*', '', module_name).strip()
+                # Remove markdown if present - using pre-compiled pattern
+                module_name = REGEX_PATTERNS['bold_markers'].sub('', module_name).strip()
                 if module_name:
                     modules.append({
                         "name": module_name,
@@ -944,8 +966,8 @@ class SlideMapper:
         video_url = ""
         
         # First, extract Module Type (can be on separate line without bullet)
-        # Support both formats: **Module Type:** Value and **Module Type**: Value (colon inside or outside bold)
-        module_type_match = re.search(r'\*\*Module Type(?::\*\*|\*\*:)\s*(.+?)(?:\n|$)', module_content, re.IGNORECASE)
+        # Using pre-compiled pattern
+        module_type_match = REGEX_PATTERNS['module_type'].search(module_content)
         if module_type_match:
             module_type = module_type_match.group(1).strip()
         
@@ -957,19 +979,18 @@ class SlideMapper:
         for line in lines:
             line_stripped = line.strip()
             
-            # Check if this line starts a new field
-            # Support both formats: **Field:** Value and **Field**: Value (colon inside or outside bold)
-            field_match = re.match(r'(?:•\s*)?\*\*([^:]+?)(?::\*\*|\*\*:)\s*(.*)$', line_stripped)
+            # Check if this line starts a new field - using pre-compiled pattern
+            field_match = REGEX_PATTERNS['field_marker'].match(line_stripped)
             if field_match:
                 # Save previous field if exists
                 if current_field:
                     field_name = current_field
                     field_value = '\n'.join(current_value).strip()
-                    # Clean up the value
-                    field_value = re.sub(r'\s+', ' ', field_value).strip()
-                    field_value = re.sub(r'\*\*', '', field_value).strip()
+                    # Clean up the value - using pre-compiled patterns
+                    field_value = REGEX_PATTERNS['whitespace'].sub(' ', field_value).strip()
+                    field_value = REGEX_PATTERNS['bold_markers'].sub('', field_value).strip()
                     # Remove trailing separators
-                    field_value = re.sub(r'\s*---\s*$', '', field_value).strip()
+                    field_value = REGEX_PATTERNS['trailing_separator'].sub('', field_value).strip()
                     # Process this field
                     field_lower = field_name.lower()
                     if 'purpose description' in field_lower or ('purpose' in field_lower and 'description' in field_lower):
@@ -1007,10 +1028,10 @@ class SlideMapper:
         if current_field:
             field_name = current_field
             field_value = '\n'.join(current_value).strip()
-            field_value = re.sub(r'\s+', ' ', field_value).strip()
-            field_value = re.sub(r'\*\*', '', field_value).strip()
+            field_value = REGEX_PATTERNS['whitespace'].sub(' ', field_value).strip()
+            field_value = REGEX_PATTERNS['bold_markers'].sub('', field_value).strip()
             # Remove trailing separators
-            field_value = re.sub(r'\s*---\s*$', '', field_value).strip()
+            field_value = REGEX_PATTERNS['trailing_separator'].sub('', field_value).strip()
             # Process this field
             field_lower = field_name.lower()
             if 'purpose description' in field_lower or ('purpose' in field_lower and 'description' in field_lower):
@@ -1131,17 +1152,11 @@ class SlideMapper:
             with open(diagram_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Extract mermaid code block - try multiple patterns
-            # Pattern 1: ```mermaid\n...\n``` (with newline before closing ```)
-            match = re.search(r'```mermaid\s*\n(.*?)\n```', content, re.DOTALL)
-            if match:
-                code = match.group(1).strip()
-                if code:
-                    print(f"✅ Extracted mermaid diagram code ({len(code)} chars)")
-                    return code
+            # Extract mermaid code block - try multiple patterns using pre-compiled patterns
+            match = REGEX_PATTERNS['mermaid_code_block1'].search(content)
+            if not match:
+                match = REGEX_PATTERNS['mermaid_code_block2'].search(content)
             
-            # Pattern 2: ```mermaid...``` (more flexible, without requiring newline before ```)
-            match = re.search(r'```mermaid\s*\n(.*?)```', content, re.DOTALL)
             if match:
                 code = match.group(1).strip()
                 if code:

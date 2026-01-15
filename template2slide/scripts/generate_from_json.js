@@ -1142,9 +1142,15 @@ async function generatePresentation(inputJsonPath) {
       
       // Render Mermaid diagrams
       if (slide.type === 'diagram' && slide.diagram?.type === 'mermaid') {
-        const diagramPath = path.join(assetsDir, `diagram_${i}.png`);
-        await renderMermaidDiagram(slide.diagram.code, diagramPath);
-        assetMap.set(i, { type: 'diagram', path: diagramPath });
+        const diagramCode = slide.diagram.code || '';
+        // Render diagram if code exists
+        if (diagramCode.trim()) {
+          const diagramPath = path.join(assetsDir, `diagram_${i}.png`);
+          await renderMermaidDiagram(diagramCode, diagramPath);
+          assetMap.set(i, { type: 'diagram', path: diagramPath });
+        } else {
+          console.warn(`[Slide ${i + 1}] Warning: Empty Mermaid diagram code - diagram will not be rendered`);
+        }
       }
     }
   } finally {

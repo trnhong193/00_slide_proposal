@@ -75,7 +75,7 @@ The system architecture consists of:
 
 ### Network
 
-**External Bandwidth:** 20 Mbps [NETWORK_001] (for remote access and updates)
+**External Bandwidth:** 20 Mbps (for remote access and updates)
 
 **Per-camera Bandwidth:** 12 Mbps
 

@@ -321,28 +321,12 @@ def insert_reference_slides(generated_pptx_path, project_info_path, output_pptx_
     # Track slides to reorder
     slides_to_reorder = []
     
-    # Step 1: Insert architecture template slide after architecture diagram slide
-    arch_template_slide_index = None
-    if system_arch_path and deployment_method:
-        arch_slide_index = DEPLOYMENT_SLIDE_MAP.get(deployment_method)
-        
-        if arch_slide_index is not None and arch_slide_index < len(system_arch_pres.slides):
-            print(f"\nStep 1: Inserting architecture template slide for deployment: {deployment_method}")
-            print(f"  Using slide {arch_slide_index + 1} from System_architecture.pptx")
-            
-            # Find architecture diagram slide in generated presentation
-            arch_diagram_index = find_architecture_slide_index(pres)
-            print(f"  Architecture diagram slide found at index {arch_diagram_index}")
-            
-            # Copy slide from system_arch_pres
-            new_slide = copy_slide_from_other_pres(system_arch_pres, arch_slide_index, pres)
-            arch_template_slide_index = len(pres.slides) - 1
-            slides_to_reorder.append((arch_template_slide_index, arch_diagram_index + 1))
-            print(f"  ✓ Architecture template slide copied (will be moved to position {arch_diagram_index + 2})")
-        else:
-            print(f"\nStep 1: Skipping architecture template slide (deployment method '{deployment_method}' not in template)")
-    else:
-        print("\nStep 1: Skipping architecture template slide (file or deployment method not found)")
+    # Step 1: Skip architecture template slide insertion - use generated Mermaid diagram instead
+    # Architecture slide from System_architecture.pptx will NOT be inserted
+    # The generated Mermaid diagram slide will be kept as-is
+    print("\nStep 1: Skipping architecture template slide insertion")
+    print("  Using generated Mermaid diagram slide (from architecture_diagram.md)")
+    print("  System_architecture.pptx slides will NOT be inserted")
     
     # Step 2: Insert Available slides 2-10 after slide 1 (Title slide) - continuously, in order
     # IMPORTANT: These slides must be inserted AFTER slide 1 (Title slide at index 0)
@@ -404,10 +388,7 @@ def insert_reference_slides(generated_pptx_path, project_info_path, output_pptx_
     available_slides_sorted = sorted(available_slides_2_10_indices, key=lambda x: x[1])
     all_reorders.extend(available_slides_sorted)
     
-    # Architecture template slide should be inserted after Available slides are in place
-    # So we add it after Available slides reorders
-    if arch_template_slide_index is not None and len(slides_to_reorder) > 0:
-        all_reorders.append((arch_template_slide_index, slides_to_reorder[0][1]))
+    # Architecture template slide insertion is skipped - no reordering needed for architecture slides
     
     # IMPORTANT: Sort by target position (ascending), then by source index (ascending)
     # Move from low target positions to high target positions

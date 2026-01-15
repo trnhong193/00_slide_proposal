@@ -7,28 +7,42 @@ function generateTimelineHTML(slide, htmlDir, assetsDir, constants) {
   const { SLIDE_WIDTH, SLIDE_HEIGHT, ACCENT_COLOR, TEXT_COLOR } = constants;
 
   let timelineHTML = '';
-  const timelineStartX = 80;
-  const timelineEndX = SLIDE_WIDTH - 80;
-  const timelineY = SLIDE_HEIGHT / 2 + 40;
-  const spacing = milestones.length > 1 ? (timelineEndX - timelineStartX) / (milestones.length - 1) : 0;
+  // Center the timeline horizontally and vertically on the slide
+  // Calculate optimal spacing and centering
+  const horizontalMargin = 100; // Equal margins on both sides
+  const timelineStartX = horizontalMargin;
+  const timelineEndX = SLIDE_WIDTH - horizontalMargin;
+  const timelineWidth = timelineEndX - timelineStartX;
+  
+  // Center timeline vertically (accounting for title at top)
+  const titleHeight = 80; // Approximate title height
+  const availableHeight = SLIDE_HEIGHT - titleHeight - 72; // 72pt bottom margin
+  const timelineY = titleHeight + (availableHeight / 2) + 20; // Center in available space
+  
+  // Calculate spacing between milestones
+  const spacing = milestones.length > 1 ? timelineWidth / (milestones.length - 1) : 0;
 
-  const textY = timelineY - 80;
+  // Position text above timeline
+  const textY = timelineY - 90;
 
   milestones.forEach((milestone, index) => {
+    // Calculate x position - center each milestone on the timeline
     const x = timelineStartX + (index * spacing);
-    const eventText = cleanTimelineEvent(milestone.event);
-    const phase = milestone.phase || '';
-    const date = milestone.date ? cleanTimelineEvent(milestone.date) : '';
+    // phase contains the phase name (e.g., "Software Deployment")
+    const phaseName = milestone.phase || milestone.event || '';
+    // date contains the duration (e.g., "T1 + 4-6 weeks")
+    const duration = milestone.date ? cleanTimelineEvent(milestone.date) : '';
 
-    const maxWidth = Math.min(160, spacing - 10);
+    // Calculate max width for text - ensure it fits between milestones
+    const maxWidth = Math.min(200, spacing - 20);
 
+    // Show phase name on top, duration below - centered on milestone point
     timelineHTML += `
-      <div style="position: absolute; left: ${x}pt; top: ${timelineY}pt;">
+      <div style="position: absolute; left: ${x}pt; top: ${timelineY}pt; transform: translateX(-50%);">
         <div style="width: 12pt; height: 12pt; background: ${ACCENT_COLOR}; border-radius: 50%; border: 2px solid ${TEXT_COLOR}; position: absolute; top: -6pt; left: -6pt;"></div>
         <div style="position: absolute; left: ${-maxWidth / 2}pt; top: ${textY - timelineY}pt; width: ${maxWidth}pt; text-align: center;">
-          <p style="color: ${TEXT_COLOR}; font-size: 11pt; line-height: 1.3; margin: 0 0 4pt 0; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(eventText)}</p>
-          <p style="color: ${ACCENT_COLOR}; font-size: 12pt; font-weight: bold; margin: 0 0 2pt 0;">${escapeHtml(phase)}</p>
-          ${date ? `<p style="color: ${TEXT_COLOR}; font-size: 10pt; margin: 0; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(date)}</p>` : ''}
+          <p style="color: ${ACCENT_COLOR}; font-size: 13pt; font-weight: bold; margin: 0 0 4pt 0; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(phaseName)}</p>
+          ${duration ? `<p style="color: ${TEXT_COLOR}; font-size: 11pt; margin: 0; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(duration)}</p>` : ''}
         </div>
       </div>
     `;
@@ -74,7 +88,7 @@ body {
 .timeline-line {
   position: absolute;
   left: ${timelineStartX}pt;
-  width: ${timelineEndX - timelineStartX}pt;
+  width: ${timelineWidth}pt;
   top: ${timelineY}pt;
   height: 2pt;
   background: ${ACCENT_COLOR};
