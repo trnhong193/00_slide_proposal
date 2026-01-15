@@ -1,0 +1,52 @@
+# Python Requirements for 00_slide_proposal
+# 
+# This file contains all Python dependencies for both:
+# - dealtransfer2template/ : Excel to template conversion
+# - template2slide/ : Template to PowerPoint conversion
+
+# =============================================================================
+# dealtransfer2template/ dependencies
+# =============================================================================
+
+# Excel file reading
+pandas>=2.0.0
+openpyxl>=3.1.0  # Required by pandas for .xlsx file support
+
+# =============================================================================
+# template2slide/ dependencies
+# =============================================================================
+
+# PowerPoint file manipulation
+python-pptx>=0.6.21
+
+# Image processing
+Pillow>=10.0.0
+
+# XML processing and validation
+lxml>=4.9.0
+
+# Secure XML parsing
+defusedxml>=0.7.1
+
+# Python 2/3 compatibility (required by python-pptx)
+six>=1.16.0
+
+# =============================================================================
+# Node.js dependencies (separate installation required)
+# =============================================================================
+# For template2slide/scripts/:
+# Run: cd template2slide/scripts && npm install
+# 
+# Required Node.js packages:
+# - playwright: ^1.57.0
+# - pptxgenjs: ^4.0.1
+# - sharp: ^0.34.5
+# - @mermaid-js/mermaid-cli: ^10.0.0 (for rendering Mermaid diagrams to PNG)
+#
+# See template2slide/scripts/package.json for details
+
+
+
+
+
+
